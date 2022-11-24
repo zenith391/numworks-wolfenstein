@@ -1,0 +1,6 @@
+id: 1ul5s1ej76xlz5q8of46oc5pwwv6ccikd7s48rmbcmo26fl6
+name: numworks-app-zig
+license: MIT
+description: Rasterization test
+root_dependencies:
+  - src: git https://github.com/kooparse/zalgebra
