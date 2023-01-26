@@ -18,7 +18,6 @@ pub fn build(b: *std.build.Builder) void {
     exe.addObjectFile("icon.o");
     exe.single_threaded = true;
     exe.strip = true;
-    exe.use_stage1 = true;
     exe.stack_size = 32 * 1024; // about 8 KiB of stack sounds reasonable
     deps.addAllTo(exe);
 
@@ -28,7 +27,7 @@ pub fn build(b: *std.build.Builder) void {
     const install_exe = b.addInstallFile(exe.getOutputSource(), "numworks-app-zig.nwa");
     install_exe.step.dependOn(&exe.step);
 
-    //const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.15", "install-nwa", "zig-out/numworks-app-zig.nwa" });
+    //const run_cmd = b.addSystemCommand(&.{ "npx", "--yes", "--", "nwlink@0.0.16", "install-nwa", "zig-out/numworks-app-zig.nwa" });
     const run_cmd = b.addSystemCommand(&.{ "nwlink", "install-nwa", "zig-out/numworks-app-zig.nwa" });
     run_cmd.step.dependOn(&install_exe.step);
 

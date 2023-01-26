@@ -9,20 +9,23 @@ pub extern var eadk_external_data_size: usize;
 
 /// RGB565 color
 pub const EadkColor = u16;
-pub const EadkRect = extern struct {
+// XXX: extern struct doesn't work on stage2?
+pub const EadkRect = packed struct {
     x: u16,
     y: u16,
     width: u16,
     height: u16,
 };
 
-pub const EadkPoint = extern struct {
+pub const EadkPoint = packed struct {
     x: u16,
     y: u16,
 };
 
 pub const SCREEN_WIDTH = 320;
 pub const SCREEN_HEIGHT = 240;
+pub const SCENE_WIDTH = 320;
+pub const SCENE_HEIGHT = 240 - 32;
 pub const screen_rectangle = EadkRect{
     .x = 0,
     .y = 0,
@@ -97,7 +100,7 @@ pub const display = struct {
         while (y < rect.height / scale) : (y += 1) {
             var x: u16 = 0;
             while (x < rect.width / scale) : (x += 1) {
-                const color = pixels[y * rect.width / 3 + x];
+                const color = pixels[y * rect.width / scale + x];
                 if (color != 0x0000) {
                     //setPixel(rect.x + x, rect.y + y, color);
                     fillRectangle(.{ .x = rect.x + x * scale, .y = rect.y + y * scale, .width = scale, .height = scale }, color);

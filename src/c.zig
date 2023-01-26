@@ -1,16 +1,6 @@
 const std = @import("std");
 
-export fn __aeabi_memcpy(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
-    _ = memcpy(dest, src, n);
-}
-export fn __aeabi_memcpy4(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
-    _ = memcpy(dest, src, n);
-}
-export fn __aeabi_memcpy8(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
-    _ = memcpy(dest, src, n);
-}
-
-fn generateConstantTable(from: f32, to: f32, comptime precision: usize, func: fn (f32) f32) [precision]f32 {
+fn generateConstantTable(from: f32, to: f32, comptime precision: usize, func: *const fn (f32) f32) [precision]f32 {
     var table: [precision]f32 = undefined;
     @setEvalBranchQuota(precision * 10);
 
@@ -87,7 +77,7 @@ export fn memset(dest: ?[*]volatile u8, c: u8, len: usize) ?[*]volatile u8 {
     return dest;
 }
 
-export fn memcpy(noalias dest: ?[*]volatile u8, noalias src: ?[*]const u8, len: usize) callconv(.C) ?[*]volatile u8 {
+fn memcpy(noalias dest: ?[*]volatile u8, noalias src: ?[*]const u8, len: usize) ?[*]volatile u8 {
     @setRuntimeSafety(false);
 
     if (len != 0) {
@@ -106,12 +96,71 @@ export fn memcpy(noalias dest: ?[*]volatile u8, noalias src: ?[*]const u8, len: 
     return dest;
 }
 
-export fn __aeabi_memset(str: [*]volatile u8, n: usize, c: u8) callconv(.AAPCS) void {
-    _ = memset(str, c, n);
+fn memmove(dest: ?[*]volatile u8, src: ?[*]const u8, n: usize) ?[*]volatile u8 {
+    @setRuntimeSafety(false);
+
+    if (@ptrToInt(dest) < @ptrToInt(src)) {
+        var index: usize = 0;
+        while (index != n) : (index += 1) {
+            dest.?[index] = src.?[index];
+        }
+    } else {
+        var index = n;
+        while (index != 0) {
+            index -= 1;
+            dest.?[index] = src.?[index];
+        }
+    }
+
+    return dest;
 }
-export fn __aeabi_memset4(str: [*]volatile u8, n: usize, c: u8) callconv(.AAPCS) void {
-    _ = memset(str, c, n);
+
+export fn __aeabi_memcpy(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memcpy(dest, src, n);
 }
-export fn __aeabi_memclr4(str: [*]volatile u8, n: usize) callconv(.AAPCS) void {
-    _ = memset(str, 0, n);
+export fn __aeabi_memcpy4(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memcpy(dest, src, n);
+}
+export fn __aeabi_memcpy8(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memcpy(dest, src, n);
+}
+
+export fn __aeabi_memset(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volatile u8 {
+    if (len == 0) {
+        return dest;
+    }
+    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    return dest;
+}
+export fn __aeabi_memset4(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volatile u8 {
+    if (len == 0) {
+        return dest;
+    }
+    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    return dest;
+}
+export fn __aeabi_memset8(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volatile u8 {
+    if (len == 0) {
+        return dest;
+    }
+    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    return dest;
+}
+
+export fn __aeabi_memclr(dest: [*c]volatile u8, len: usize) [*c]volatile u8 {
+    return __aeabi_memset(dest, len, 0);
+}
+export fn __aeabi_memclr4(str: [*]volatile u8, n: usize) callconv(.AAPCS) [*c]volatile u8 {
+    _ = @call(.always_inline, __aeabi_memset, .{ str, n, 0 });
+    return str;
+}
+
+export fn __aeabi_memmove(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memmove(dest, src, n);
+}
+export fn __aeabi_memmove4(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memmove(dest, src, n);
+}
+export fn __aeabi_memmove8(dest: [*]u8, src: [*]u8, n: usize) callconv(.AAPCS) void {
+    _ = memmove(dest, src, n);
 }

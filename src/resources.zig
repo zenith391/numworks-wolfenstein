@@ -3,12 +3,29 @@ const bmp = @import("bmp.zig");
 const eadk = @import("eadk.zig");
 const EadkColor = eadk.EadkColor;
 
-pub const wall_1 = makeImageArray(@embedFile("../assets/wall_1.bmp"));
-pub const wall_2 = makeImageArray(@embedFile("../assets/wall_2.bmp"));
-pub const wall_3 = makeImageArray(@embedFile("../assets/wall_3.bmp"));
-pub const pistol = makeImageArray(@embedFile("../assets/pistol.bmp"));
-pub const pistol_fire = makeImageArray(@embedFile("../assets/pistol_fire.bmp"));
-pub const guard = makeImageArray(@embedFile("../assets/guard_1.bmp"));
+pub const wall_1 = makeImageArray(@embedFile("assets/wall_1.bmp"));
+pub const wall_2 = makeImageArray(@embedFile("assets/wall_2.bmp"));
+pub const wall_3 = makeImageArray(@embedFile("assets/wall_3.bmp"));
+pub const wall_4 = makeImageArray(@embedFile("assets/wall_4.bmp"));
+pub const wall_5 = makeImageArray(@embedFile("assets/wall_5.bmp"));
+pub const pistol = makeImageArray(@embedFile("assets/pistol.bmp"));
+pub const pistol_fire = makeImageArray(@embedFile("assets/pistol_fire.bmp"));
+pub const guard = makeImageArray(@embedFile("assets/guard_1.bmp"));
+pub const guard_run_1 = makeImageArray(@embedFile("assets/guard_run_1.bmp"));
+pub const guard_run_2 = makeImageArray(@embedFile("assets/guard_run_2.bmp"));
+pub const guard_run_3 = makeImageArray(@embedFile("assets/guard_run_3.bmp"));
+pub const guard_run_4 = makeImageArray(@embedFile("assets/guard_run_4.bmp"));
+pub const guard_shoot = makeImageArray(@embedFile("assets/guard_shoot.bmp"));
+pub const guard_shooting = makeImageArray(@embedFile("assets/guard_shooting.bmp"));
+
+pub const player_0 = makeImageArray(@embedFile("assets/player_0.bmp"));
+pub const player_1 = makeImageArray(@embedFile("assets/player_1.bmp"));
+pub const player_2 = makeImageArray(@embedFile("assets/player_2.bmp"));
+pub const player_3 = makeImageArray(@embedFile("assets/player_3.bmp"));
+pub const player_4 = makeImageArray(@embedFile("assets/player_4.bmp"));
+pub const player_5 = makeImageArray(@embedFile("assets/player_5.bmp"));
+pub const player_6 = makeImageArray(@embedFile("assets/player_6.bmp"));
+pub const player_7 = makeImageArray(@embedFile("assets/player_7.bmp"));
 
 fn MakeImageArrayReturn(comptime bmpFile: []const u8) type {
     @setEvalBranchQuota(100000);

@@ -15,6 +15,8 @@ const za = @import("zalgebra");
 // TODO: portes
 // TODO: les ennemis ne spawn que là où on ne regarde pas
 // TODO: les ennemis ne spawnent qu'à l'intérieur du niveau (flood fill boolean array)
+// TODO: afficher animation enemi qui meurt + cadavre (nettoyé à prochaine vague)
+// TODO: écran rouge transparent quand on prend dégâts
 
 const Vec2 = za.Vec2;
 const Vec3 = za.Vec3;
@@ -30,7 +32,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     eadk.display.swapBuffer();
 
     var buf: [512]u8 = undefined;
-    const ra = @returnAddress() - @ptrToInt(panic);
+    const ra = @returnAddress() - @ptrToInt(&panic);
     const str = std.fmt.bufPrintZ(&buf, "@ 0x{x} (frame {d})", .{ ra, t }) catch unreachable;
 
     var i: usize = 0;
@@ -40,7 +42,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
         eadk.display.waitForVblank();
 
         const kbd = eadk.keyboard.scan();
-        if (kbd.isDown(.Backspace) or i > 100) {
+        if (kbd.isDown(.Backspace) or i > 200) {
             break;
         }
         i += 1;
@@ -50,7 +52,7 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 }
 
 const Camera = struct {
-    position: Vec2 = Vec2.new(29, 48),
+    position: Vec2 = Vec2.new(35, 62),
     yaw: f32 = std.math.degreesToRadians(f32, 270),
 
     pub fn input(self: *Camera) void {
@@ -73,11 +75,13 @@ const Camera = struct {
                 self.position.data[1] -= forward.y();
             }
         }
+
+        const rotationDegrees: f32 = if (kbd.isDown(.Exe)) 2.0 else 4.0;
         if (kbd.isDown(.Left)) {
-            self.yaw -= std.math.degreesToRadians(f32, 4.0 * DELTA_SCALE);
+            self.yaw -= std.math.degreesToRadians(f32, rotationDegrees * DELTA_SCALE);
         }
         if (kbd.isDown(.Right)) {
-            self.yaw += std.math.degreesToRadians(f32, 4.0 * DELTA_SCALE);
+            self.yaw += std.math.degreesToRadians(f32, rotationDegrees * DELTA_SCALE);
         }
     }
 
@@ -103,10 +107,12 @@ var camera = Camera{};
 var fps: f32 = 40;
 var hp: u8 = 100; // de 0 à 100
 
-const MAP_WIDTH = 57;
-const MAP_HEIGHT = 57;
+const MAP_WIDTH = 64;
+const MAP_HEIGHT = 64;
 
 const DELTA_SCALE = 1.0;
+
+const SPRITE_TRANSPARENT_COLOR = eadk.rgb(0x980088);
 
 pub fn loadMapFromFile(comptime file: []const u8) [MAP_WIDTH][MAP_HEIGHT]u8 {
     comptime {
@@ -169,10 +175,9 @@ fn fill(filled: *[MAP_WIDTH][MAP_HEIGHT]bool, x: usize, y: usize) void {
 //};
 const worldMap = loadMapFromFile(@embedFile("level.txt"));
 const potentialEnemySpawns = blk: {
-
     @setEvalBranchQuota(MAP_WIDTH * MAP_HEIGHT * 10);
     var array = std.mem.zeroes([MAP_WIDTH][MAP_HEIGHT]bool);
-    fill(&array, 30, 47);
+    fill(&array, 35, 62);
 
     // var slice: []const u8 = &.{};
     // var y = 0;
@@ -199,11 +204,11 @@ const Sprite = struct {
     y: f32,
     distance: f32 = undefined,
     lastSeenPlayerPos: Vec2 = Vec2.new(0, 0),
+    shootTimer: u8 = 60,
 
     pub fn sortDsc(_: void, a: Sprite, b: Sprite) bool {
         return a.distance > b.distance;
     }
-
 
     pub fn sortAsc(_: void, a: Sprite, b: Sprite) bool {
         return a.distance < b.distance;
@@ -298,16 +303,44 @@ const Sprite = struct {
         if (canSee[@floatToInt(usize, camera.position.x())][@floatToInt(usize, camera.position.y())]) {
             self.lastSeenPlayerPos = camera.position;
         }
+
+        var moved = false;
+        var prepareShooting = false;
         if (self.lastSeenPlayerPos.x() != 0) {
             const direction = self.lastSeenPlayerPos.sub(Vec2.new(self.x, self.y)).norm().scale(0.05 * DELTA_SCALE);
-            if (self.lastSeenPlayerPos.sub(Vec2.new(self.x, self.y)).length() > 1.5) {
+            if (camera.position.sub(Vec2.new(self.x, self.y)).length() > 3.5) {
+                moved = true;
                 if (worldMap[@floatToInt(usize, self.x + direction.x())][@floatToInt(usize, self.y)] == 0) {
                     self.x += direction.x();
                 }
                 if (worldMap[@floatToInt(usize, self.x)][@floatToInt(usize, self.y + direction.y())] == 0) {
                     self.y += direction.y();
                 }
+            } else {
+                prepareShooting = true;
+                self.shootTimer -= 1;
+                if (self.shootTimer == 0) {
+                    // tirer
+                    // TODO: aabb check
+
+                    // TODO: inversement proportionnel à la distance
+                    hp -|= 20;
+
+                    self.shootTimer = 60; // 1.5 secondes
+                }
             }
+        }
+
+        if (moved) {
+            self.texture = 1 + @intCast(u8, (t / 5) % 4);
+            self.shootTimer = 40; // 1 seconde
+        } else if (prepareShooting) {
+            self.texture = 5;
+            if (self.shootTimer > 55) {
+                self.texture = 6;
+            }
+        } else {
+            self.texture = 0;
         }
     }
 };
@@ -324,8 +357,8 @@ const WallState = struct {
 };
 
 /// 8 ennemis en même temps maximum
-var sprites = std.BoundedArray(Sprite, 32).init(0) catch unreachable;
-var wall_stripes = std.mem.zeroes([eadk.SCREEN_WIDTH]WallState);
+var sprites = std.BoundedArray(Sprite, 8).init(0) catch unreachable;
+var wall_stripes = std.mem.zeroes([eadk.SCENE_WIDTH]WallState);
 
 // TODO: passer en 24x24? ne prend que 3.5KiB pour 3 textures
 // voire utiliser 32x32 si il reste de la RAM après que le jeu soit fini
@@ -335,24 +368,45 @@ const textures = [_][TEXTURE_HEIGHT][TEXTURE_WIDTH]eadk.EadkColor{
     resources.wall_1,
     resources.wall_2,
     resources.wall_3,
+    resources.wall_4,
+    resources.wall_5,
 };
-const SPR_TEX_WIDTH = 32;
-const SPR_TEX_HEIGHT = 32;
+const SPR_TEX_WIDTH = 48;
+const SPR_TEX_HEIGHT = 48;
 const sprite_textures = [_][SPR_TEX_HEIGHT][SPR_TEX_WIDTH]eadk.EadkColor{
     resources.guard,
+    resources.guard_run_1,
+    resources.guard_run_2,
+    resources.guard_run_3,
+    resources.guard_run_4,
+    resources.guard_shoot,
+    resources.guard_shooting,
+};
+
+const player_textures = [_][31][24]eadk.EadkColor {
+    resources.player_0,
+    resources.player_1,
+    resources.player_2,
+    resources.player_3,
+    resources.player_4,
+    resources.player_5,
+    resources.player_6,
+    resources.player_7,
 };
 /// For how long does the pistol appears fired
 var pistolFiredTime: u16 = 0;
 
 fn draw() void {
+    //@setRuntimeSafety(false);
+    
     if (state == .MainMenu) {
         // afficher menu
         eadk.display.fillRectangle(
             .{
                 .x = 0,
                 .y = 0,
-                .width = eadk.SCREEN_WIDTH,
-                .height = eadk.SCREEN_HEIGHT,
+                .width = eadk.SCENE_WIDTH,
+                .height = eadk.SCENE_HEIGHT,
             },
             eadk.rgb(0x000000),
         );
@@ -363,16 +417,16 @@ fn draw() void {
         eadk.display.fillRectangle(.{
             .x = 0,
             .y = 0,
-            .width = eadk.SCREEN_WIDTH,
-            .height = eadk.SCREEN_HEIGHT / 2,
+            .width = eadk.SCENE_WIDTH,
+            .height = eadk.SCENE_HEIGHT / 2,
         }, eadk.rgb(0x383838));
     }
-    if (!eadk.display.isUpperBuffer) {
+    if (!eadk.display.isUpperBuffer or true) {
         eadk.display.fillRectangle(.{
             .x = 0,
-            .y = eadk.SCREEN_HEIGHT / 2,
-            .width = eadk.SCREEN_WIDTH,
-            .height = eadk.SCREEN_HEIGHT / 2,
+            .y = eadk.SCENE_HEIGHT / 2,
+            .width = eadk.SCENE_WIDTH,
+            .height = eadk.SCENE_HEIGHT / 2,
         }, eadk.rgb(0x888888));
     }
 
@@ -382,13 +436,13 @@ fn draw() void {
     const dir = camera.getForward();
     const fbRect = eadk.display.getFramebufferRect();
 
-    const w = eadk.SCREEN_WIDTH;
-    const h = eadk.SCREEN_HEIGHT;
+    const w = eadk.SCENE_WIDTH;
+    const h = eadk.SCENE_HEIGHT;
 
-    var zBuffer: [eadk.SCREEN_WIDTH]f32 = undefined;
+    var zBuffer: [eadk.SCENE_WIDTH]f32 = undefined;
     var x: u16 = 0;
     while (x < w) : (x += 1) {
-        if (!eadk.display.isUpperBuffer) { // calculer une seule foi
+        if (!eadk.display.isUpperBuffer) { // calculer une seule fois
             const cameraX = @intToFloat(f32, 2 * x) / @intToFloat(f32, w) - 1.0;
             const rayDirX = dir.x() + planeX * cameraX;
             const rayDirY = dir.y() + planeY * cameraX;
@@ -469,7 +523,7 @@ fn draw() void {
                 camera.position.x() + perpWallDist * rayDirX;
             wallX -= @floor(wallX);
 
-            var texX = @floatToInt(u8, wallX * @as(f32, TEXTURE_WIDTH));
+            var texX = std.math.lossyCast(u8, wallX * @as(f32, TEXTURE_WIDTH));
             if (side == 0 and rayDirX > 0) texX = TEXTURE_WIDTH - texX - 1;
             if (side == 1 and rayDirY < 0) texX = TEXTURE_WIDTH - texX - 1;
 
@@ -495,7 +549,7 @@ fn draw() void {
         const drawEnd = std.math.min(fbRect.y + fbRect.height, stripe.drawEnd);
         while (y < drawEnd) : (y += 1) {
             @setRuntimeSafety(false);
-            const texY = @floatToInt(usize, stripe.texPos) % TEXTURE_HEIGHT;
+            const texY = std.math.lossyCast(usize, stripe.texPos) % TEXTURE_HEIGHT;
             stripe.texPos += stripe.step;
 
             var color = texture[texY][stripe.texX];
@@ -518,26 +572,26 @@ fn draw() void {
         const invDet = 1.0 / (planeX * dir.y() - dir.x() * planeY);
         const transformX = invDet * (dir.y() * spriteX - dir.x() * spriteY);
         const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-        const spriteScreenX = @floatToInt(u16, @intToFloat(f32, w) / 2.0 * (1 + transformX / transformY));
-        const spriteHeight = @floatToInt(u16, @fabs(@intToFloat(f32, h) / transformY));
+        var spriteScreenX = std.math.min(@floatToInt(u16, @intToFloat(f32, w) / 2.0 * (1 + transformX / transformY)), 0x7FFF);
+        var spriteHeight = std.math.lossyCast(u16, @fabs(@intToFloat(f32, h) / transformY));
 
-        const drawStartY = std.math.max(0, h / 2 - spriteHeight / 2);
+        const drawStartY = h / 2 -| spriteHeight / 2;
         const drawEndY = std.math.min(h / 2 + spriteHeight / 2, h - 1);
 
         const spriteWidth = spriteHeight;
-        const drawStartX = std.math.max(0, spriteScreenX - spriteWidth / 2);
+        const drawStartX = spriteScreenX -| spriteWidth / 2;
         const drawEndX = std.math.min(spriteScreenX + spriteWidth / 2, w - 1);
 
         var stripe = drawStartX;
         while (stripe < drawEndX) : (stripe += 1) {
-            const texX = @floatToInt(u16, 256 * @intToFloat(f32, stripe - drawStartX) * SPR_TEX_WIDTH / @intToFloat(f32, spriteWidth)) / 256;
+            const texX = std.math.lossyCast(u16, 256 * @intToFloat(f32, stripe - drawStartX) * SPR_TEX_WIDTH / @intToFloat(f32, spriteWidth)) / 256;
             if (transformY > 0 and stripe > 0 and stripe < w and transformY < zBuffer[stripe]) {
                 var y: u16 = drawStartY;
                 while (y < drawEndY) : (y += 1) {
                     const d = @as(u32, y) * 256 + @as(u32, spriteHeight) * 128 - @as(u32, h) * 128; // ???? https://lodev.org/cgtutor/raycasting3.html
                     const texY = ((d * SPR_TEX_HEIGHT) / spriteHeight) / 256;
                     const color = sprite_textures[sprite.texture][texY][texX];
-                    if (color != 0x0000) {
+                    if (color != SPRITE_TRANSPARENT_COLOR) {
                         eadk.display.setPixel(stripe, y, color);
                     }
                 }
@@ -549,27 +603,49 @@ fn draw() void {
     if (!eadk.display.isUpperBuffer) {
         const isPistolFired = pistolFiredTime > 36;
         const isPistolReloading = pistolFiredTime > 0 and pistolFiredTime <= 36;
+        const SCALE = 2;
         if (isPistolFired) {
             eadk.display.fillTransparentImage(
-                .{ .x = 320 / 2 - (24 * 3 / 2), .y = 240 - (29 * 3 - 10), .width = 24 * 3, .height = 29 * 3 - 10 },
+                .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (29 * SCALE - 10), .width = 24 * SCALE, .height = 29 * SCALE - 10 },
                 @ptrCast([*]const u16, &resources.pistol_fire),
-                3,
+                SCALE,
             );
         } else {
             if (isPistolReloading) {
                 eadk.display.fillTransparentImage(
-                    .{ .x = 320 / 2 - (24 * 3 / 2), .y = 240 - (24 * 3 - 10), .width = 24 * 3, .height = 24 * 3 - 10 },
+                    .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (24 * SCALE - 10), .width = 24 * SCALE, .height = 24 * SCALE - 10 },
                     @ptrCast([*]const u16, &resources.pistol),
-                    3,
+                    SCALE,
                 );
             } else {
                 eadk.display.fillTransparentImage(
-                    .{ .x = 320 / 2 - (24 * 3 / 2), .y = 240 - (24 * 3), .width = 24 * 3, .height = 24 * 3 },
+                    .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (24 * SCALE), .width = 24 * SCALE, .height = 24 * SCALE },
                     @ptrCast([*]const u16, &resources.pistol),
-                    3,
+                    SCALE,
                 );
             }       
         }
+
+        // HUD
+        eadk.display.fillRectangle(.{
+            .x = 0,
+            .y = eadk.SCENE_HEIGHT,
+            .width = eadk.SCREEN_WIDTH,
+            .height = eadk.SCREEN_HEIGHT - eadk.SCENE_HEIGHT,
+        }, eadk.rgb(0x404040));
+
+        const player_texture = std.math.clamp((100 - hp) / (100 / 8), 0, 7);
+        eadk.display.fillRectangle(
+            .{ .x = eadk.SCREEN_WIDTH / 2 - (32 / 2), .y = eadk.SCREEN_HEIGHT - 32, .width = 32, .height = 32 }, eadk.rgb(0x484848));
+        eadk.display.fillTransparentImage(
+            .{ .x = eadk.SCREEN_WIDTH / 2 - (24 / 2), .y = eadk.SCREEN_HEIGHT - 31, .width = 24, .height = 31 },
+            @ptrCast([*]const u16, &player_textures[player_texture]),
+            1,
+        );
+    }
+
+    if (hp == 0) {
+        state = .MainMenu;
     }
 }
 
@@ -656,6 +732,10 @@ fn eadk_main() void {
 
         var buf: [100]u8 = undefined;
         if (state == .Playing) {
+            if (hp < 100) {
+                if (t % 40 == 0) hp += 1; // TODO: des potions de soin plutôt?
+            }
+
             const msg = std.fmt.bufPrintZ(&buf, "{d}fps", .{@floatToInt(u16, fps)}) catch unreachable;
             eadk.display.drawString(msg, .{ .x = 0, .y = 0 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
             eadk.display.drawString(
@@ -678,9 +758,12 @@ fn eadk_main() void {
             eadk.display.drawString("Loupstein", .{ .x = 0, .y = 0 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
             eadk.display.drawString("(c) Zen1th", .{ .x = 0, .y = 20 }, false, eadk.rgb(0x888888), eadk.rgb(0x000000));
             eadk.display.drawString("> Press EXE to play", .{ .x = 0, .y = 220 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x00000));
+
             if (kbd.isDown(.Exe)) {
                 state = .Playing;
                 t = 0;
+                hp = 100;
+                sprites.resize(0) catch unreachable;
             }
         } else {
             pistolFiredTime -|= 1;
@@ -706,7 +789,7 @@ fn eadk_main() void {
         const end = eadk.eadk_timing_millis();
         const frameFps = 1.0 / (@intToFloat(f32, @intCast(u32, end - start)) / 1000);
         fps = fps * 0.9 + frameFps * 0.1; // faire interpolation linéaire vers la valeur fps
-        eadk.display.waitForVblank();
+        if (fps > 40) eadk.display.waitForVblank();
     }
 }
 
