@@ -38,14 +38,30 @@ pub fn rgb(hex: u24) EadkColor {
     const green = (hex >> 8) & 0xFF;
     const blue = (hex) & 0xFF;
 
-    const result = @intCast(u16, (red >> 3) << 11 | // 5 bits of red
+    const result = @as(u16, @intCast((red >> 3) << 11 | // 5 bits of red
         (green >> 2) << 5 | // 6 bits of green
-        (blue >> 3)); // 5 bits of blue
+        (blue >> 3))); // 5 bits of blue
     if (result == 0x0000 and hex != 0x000000) {
         // not true black shouldn't result in true black
         return 1 << 11 | 1 << 5 | 1;
     }
     return result;
+}
+
+pub fn getRed(color: EadkColor) u5 {
+    return @as(u5, @truncate(color >> 11));
+}
+
+pub fn getGreen(color: EadkColor) u6 {
+    return @as(u6, @truncate(color >> 5));
+}
+
+pub fn getBlue(color: EadkColor) u5 {
+    return @as(u5, @truncate(color));
+}
+
+pub fn colorFromComponents(red: u5, green: u6, blue: u5) EadkColor {
+    return @as(u16, red) << 11 | @as(u16, green) << 5 | @as(u16, blue);
 }
 
 extern fn eadk_display_pull_rect(rect: EadkRect, pixels: [*]const EadkColor) void;
@@ -57,7 +73,7 @@ pub const display = struct {
     // this uses 76 800 bytes
     pub const FRAMEBUFFER_WIDTH = 320;
     pub const FRAMEBUFFER_HEIGHT = 120;
-    var framebuffer: [FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT]EadkColor = undefined;
+    pub var framebuffer: [FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT]EadkColor = undefined;
     pub var isUpperBuffer = false;
 
     // Pour dessiner, deux buffers sont utilisés, un pour le haut (320x140)
@@ -87,7 +103,7 @@ pub const display = struct {
     }
 
     pub fn clearBuffer() void {
-        std.mem.set(EadkColor, &framebuffer, 0);
+        @memset(&framebuffer, 0);
     }
 
     pub fn fillImage(rect: EadkRect, pixels: [*]const EadkColor) void {
@@ -117,6 +133,15 @@ pub const display = struct {
         }
     }
 
+    pub inline fn getPixel(x: u16, y: u16) EadkColor {
+        if (isUpperBuffer and x < FRAMEBUFFER_WIDTH and y < FRAMEBUFFER_HEIGHT) {
+            return framebuffer[y * FRAMEBUFFER_WIDTH + x];
+        } else if (!isUpperBuffer and x < FRAMEBUFFER_WIDTH and y >= FRAMEBUFFER_HEIGHT) {
+            return framebuffer[(y - FRAMEBUFFER_HEIGHT) * FRAMEBUFFER_WIDTH + x];
+        }
+        return 0x0000;
+    }
+
     pub inline fn setPixel(x: u16, y: u16, color: EadkColor) void {
         if (isUpperBuffer and x < FRAMEBUFFER_WIDTH and y < FRAMEBUFFER_HEIGHT) {
             framebuffer[y * FRAMEBUFFER_WIDTH + x] = color;
@@ -127,13 +152,13 @@ pub const display = struct {
 
     pub fn drawHorizontalLine(x1: u16, x2: u16, y: u16, color: EadkColor) void {
         const nullable_ptr = if (isUpperBuffer and y < FRAMEBUFFER_HEIGHT)
-            @ptrCast([*]EadkColor, &framebuffer[y * FRAMEBUFFER_WIDTH])
+            @as([*]EadkColor, @ptrCast(&framebuffer[y * FRAMEBUFFER_WIDTH]))
         else if (!isUpperBuffer and y >= FRAMEBUFFER_HEIGHT)
-            @ptrCast([*]EadkColor, &framebuffer[(y - FRAMEBUFFER_HEIGHT) * FRAMEBUFFER_WIDTH])
+            @as([*]EadkColor, @ptrCast(&framebuffer[(y - FRAMEBUFFER_HEIGHT) * FRAMEBUFFER_WIDTH]))
         else
             null;
         if (nullable_ptr) |ptr| {
-            std.mem.set(EadkColor, ptr[x1..x2], color);
+            @memset(ptr[x1..x2], color);
         }
     }
 
@@ -151,8 +176,8 @@ pub const display = struct {
         var y1 = in_y1;
         var y2 = in_y2;
         var steep = false;
-        if (std.math.absInt(@intCast(i16, x1) - @intCast(i16, x2)) catch unreachable <
-            std.math.absInt(@intCast(i16, y1) - @intCast(i16, y2)) catch unreachable)
+        if (std.math.absInt(@as(i16, @intCast(x1)) - @as(i16, @intCast(x2))) catch unreachable <
+            std.math.absInt(@as(i16, @intCast(y1)) - @as(i16, @intCast(y2))) catch unreachable)
         {
             // toujours plus horizontal que vertical (pente réduite)
             std.mem.swap(u16, &x1, &y1);
@@ -165,11 +190,11 @@ pub const display = struct {
         }
 
         var x: u16 = x1;
-        const length = @intToFloat(f32, x2 - x1);
-        const height = @intToFloat(f32, y2) - @intToFloat(f32, y1);
+        const length = @as(f32, @floatFromInt(x2 - x1));
+        const height = @as(f32, @floatFromInt(y2)) - @as(f32, @floatFromInt(y1));
         while (x <= x2) : (x += 1) {
-            const t = @intToFloat(f32, x - x1) / length;
-            const y = @intCast(u16, @intCast(i16, y1) + @floatToInt(i16, height * t));
+            const t = @as(f32, @floatFromInt(x - x1)) / length;
+            const y = @as(u16, @intCast(@as(i16, @intCast(y1)) + @as(i16, @intFromFloat(height * t))));
             if (steep) {
                 setPixel(y, x, color);
             } else {
@@ -180,12 +205,12 @@ pub const display = struct {
 
     fn clampX(coord: f32) u16 {
         @setRuntimeSafety(false);
-        return @floatToInt(u16, std.math.clamp(coord, 0, SCREEN_WIDTH));
+        return @as(u16, @intFromFloat(std.math.clamp(coord, 0, SCREEN_WIDTH)));
     }
 
     fn clampY(coord: f32) u16 {
         @setRuntimeSafety(false);
-        return @floatToInt(u16, std.math.clamp(coord, 0, SCREEN_HEIGHT));
+        return @as(u16, @intFromFloat(std.math.clamp(coord, 0, SCREEN_HEIGHT)));
     }
 
     pub fn drawTriangle(x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, color: EadkColor) void {
@@ -254,7 +279,7 @@ pub const keyboard = struct {
         bitfield: u64,
 
         pub fn isDown(self: KeyboardState, key: Key) bool {
-            const shift = @intCast(u6, @enumToInt(key));
+            const shift = @as(u6, @intCast(@intFromEnum(key)));
             return (self.bitfield >> shift) & 1 == 1;
         }
     };

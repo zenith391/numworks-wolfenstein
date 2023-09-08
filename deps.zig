@@ -26,7 +26,7 @@ pub fn addAllTo(exe: *std.build.LibExeObjStep) void {
             llc = true;
         }
         inline for (pkg.c_include_dirs) |item| {
-            exe.addIncludeDir(@field(dirs, decl.name) ++ "/" ++ item);
+            exe.addIncludePath(@field(dirs, decl.name) ++ "/" ++ item);
             llc = true;
         }
         inline for (pkg.c_source_files) |item| {
@@ -58,16 +58,16 @@ fn checkMinZig(current: std.SemanticVersion, exe: *std.build.LibExeObjStep) void
 pub const dirs = struct {
     pub const _root = "";
     pub const _1ul5s1ej76xl = cache ++ "/../..";
-    pub const _a6iebzbnxh43 = cache ++ "/git/github.com/kooparse/zalgebra";
+    pub const _vlh6sbbpxsxz = cache ++ "/git/github.com/kooparse/zalgebra";
 };
 
 pub const package_data = struct {
     pub const _1ul5s1ej76xl = Package{
         .directory = dirs._1ul5s1ej76xl,
     };
-    pub const _a6iebzbnxh43 = Package{
-        .directory = dirs._a6iebzbnxh43,
-        .pkg = Pkg{ .name = "zalgebra", .source = .{ .path = dirs._a6iebzbnxh43 ++ "/src/main.zig" }, .dependencies = null },
+    pub const _vlh6sbbpxsxz = Package{
+        .directory = dirs._vlh6sbbpxsxz,
+        .pkg = Pkg{ .name = "zalgebra", .source = .{ .path = dirs._vlh6sbbpxsxz ++ "/src/main.zig" }, .dependencies = null },
     };
     pub const _root = Package{
         .directory = dirs._root,
@@ -75,11 +75,11 @@ pub const package_data = struct {
 };
 
 pub const packages = &[_]Package{
-    package_data._a6iebzbnxh43,
+    package_data._vlh6sbbpxsxz,
 };
 
 pub const pkgs = struct {
-    pub const zalgebra = package_data._a6iebzbnxh43;
+    pub const zalgebra = package_data._vlh6sbbpxsxz;
 };
 
 pub const imports = struct {

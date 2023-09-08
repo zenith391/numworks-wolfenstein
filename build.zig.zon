@@ -1,0 +1,10 @@
+.{
+	.name = "numworks-wolfenstein",
+	.version = "1.0.0",
+	.dependencies = .{
+		.zalgebra = .{
+			.url = "https://github.com/kooparse/zalgebra/archive/23aaf89db3b2a9940fd5dfa81e10e9e6f8345ea1.tar.gz",
+			.hash = "1220e7feb5be6842dbc0d20a2a9922e5a61610bfbd3039d7497b0722be5662c603e4",
+		}
+	}
+}

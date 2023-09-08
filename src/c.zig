@@ -6,7 +6,7 @@ fn generateConstantTable(from: f32, to: f32, comptime precision: usize, func: *c
 
     var idx: usize = 0;
     var x: f32 = from;
-    const increment = (to - from) / @intToFloat(f32, table.len);
+    const increment = (to - from) / @as(f32, @floatFromInt(table.len));
     while (x < to) : (x += increment) {
         table[idx] = func(x);
         idx += 1;
@@ -28,7 +28,7 @@ fn lerp(a: f32, b: f32, t: f32) f32 {
 export fn cosf(theta: f32) f32 {
     const x = @mod(theta, 2 * std.math.pi);
     const range = 2.0 * std.math.pi - 0.0;
-    const idx = @floatToInt(usize, x / range * (COS_PRECISION - 1));
+    const idx = @as(usize, @intFromFloat(x / range * (COS_PRECISION - 1)));
     if (idx != COS_PRECISION - 1) {
         const t = x / range * COS_PRECISION - @floor(x / range * COS_PRECISION);
         return lerp(cos_table[idx], cos_table[idx + 1], t);
@@ -47,7 +47,7 @@ fn zigTan(x: f32) f32 {
 export fn tanf(theta: f32) f32 {
     const x = @mod(theta, std.math.pi);
     const range = 1.0 * std.math.pi - 0.0;
-    const idx = @floatToInt(usize, x / range * (COS_PRECISION - 1));
+    const idx = @as(usize, @intFromFloat(x / range * (COS_PRECISION - 1)));
     if (idx != COS_PRECISION - 1) {
         const t = x / range * COS_PRECISION - @floor(x / range * COS_PRECISION);
         return lerp(tan_table[idx], tan_table[idx + 1], t);
@@ -99,7 +99,7 @@ fn memcpy(noalias dest: ?[*]volatile u8, noalias src: ?[*]const u8, len: usize) 
 fn memmove(dest: ?[*]volatile u8, src: ?[*]const u8, n: usize) ?[*]volatile u8 {
     @setRuntimeSafety(false);
 
-    if (@ptrToInt(dest) < @ptrToInt(src)) {
+    if (@intFromPtr(dest) < @intFromPtr(src)) {
         var index: usize = 0;
         while (index != n) : (index += 1) {
             dest.?[index] = src.?[index];
@@ -129,21 +129,21 @@ export fn __aeabi_memset(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volati
     if (len == 0) {
         return dest;
     }
-    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    for (dest[0..len]) |*b| b.* = @as(u8, @intCast(c));
     return dest;
 }
 export fn __aeabi_memset4(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volatile u8 {
     if (len == 0) {
         return dest;
     }
-    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    for (dest[0..len]) |*b| b.* = @as(u8, @intCast(c));
     return dest;
 }
 export fn __aeabi_memset8(dest: [*c]volatile u8, len: usize, c: c_int) [*c]volatile u8 {
     if (len == 0) {
         return dest;
     }
-    for (dest[0..len]) |*b| b.* = @intCast(u8, c);
+    for (dest[0..len]) |*b| b.* = @as(u8, @intCast(c));
     return dest;
 }
 

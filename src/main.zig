@@ -3,26 +3,26 @@ const eadk = @import("eadk.zig");
 const resources = @import("resources.zig");
 const za = @import("zalgebra");
 
-// TODO: système d'"arena"
+// Système d'"arena"
 // On est sur la même map
 // Les ennemis spawn à des endroits aléatoires de la map
 // On a une vie limité et peu ou pas de trucs pour regen
 // On doit tuer le plus d'ennemis jusqu'à la mort
 // Un score à la fin
+// TODO: potions
+// TODO: plusieurs niveaux
 // TODO: compteur ennemis restants
-// TODO: images gardes qui marchent
 
 // TODO: portes
 // TODO: les ennemis ne spawn que là où on ne regarde pas
-// TODO: les ennemis ne spawnent qu'à l'intérieur du niveau (flood fill boolean array)
 // TODO: afficher animation enemi qui meurt + cadavre (nettoyé à prochaine vague)
-// TODO: écran rouge transparent quand on prend dégâts
+// TODO: quand l'arme est tirée, comparer la distance à l'ennemi avec le zBuffer, si supérieur alors on a touché un mur
 
 const Vec2 = za.Vec2;
 const Vec3 = za.Vec3;
 const Vec4 = za.Vec4;
 
-pub const APP_NAME = "Loupenstein 3D";
+pub const APP_NAME = "NazKiller";
 
 pub export const eadk_app_name: [APP_NAME.len:0]u8 linksection(".rodata.eadk_app_name") = APP_NAME.*;
 pub export const eadk_api_level: u32 linksection(".rodata.eadk_api_level") = 0;
@@ -32,12 +32,12 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     eadk.display.swapBuffer();
 
     var buf: [512]u8 = undefined;
-    const ra = @returnAddress() - @ptrToInt(&panic);
+    const ra = @returnAddress() - @intFromPtr(&panic);
     const str = std.fmt.bufPrintZ(&buf, "@ 0x{x} (frame {d})", .{ ra, t }) catch unreachable;
 
     var i: usize = 0;
     while (true) {
-        eadk.display.drawString(@ptrCast([:0]const u8, msg), .{ .x = 0, .y = 0 }, false, eadk.rgb(0), eadk.rgb(0xFFFFFF));
+        eadk.display.drawString(@as([:0]const u8, @ptrCast(msg)), .{ .x = 0, .y = 0 }, false, eadk.rgb(0), eadk.rgb(0xFFFFFF));
         eadk.display.drawString(str, .{ .x = 0, .y = 16 }, false, eadk.rgb(0), eadk.rgb(0xFFFFFF));
         eadk.display.waitForVblank();
 
@@ -54,24 +54,31 @@ pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
 const Camera = struct {
     position: Vec2 = Vec2.new(35, 62),
     yaw: f32 = std.math.degreesToRadians(f32, 270),
+    pitch: i32 = 0,
+    walkUp: bool = true,
 
     pub fn input(self: *Camera) void {
         const forward = self.getForward().scale(0.15 * DELTA_SCALE);
 
         const kbd = eadk.keyboard.scan();
+        const walking = kbd.isDown(.Up) or kbd.isDown(.Down);
+        if (!walking) {
+            self.walkUp = true;
+            self.pitch = 0;
+        }
         if (kbd.isDown(.Up)) {
-            if (worldMap[@floatToInt(usize, self.position.x() + forward.x())][@floatToInt(usize, self.position.y())] == 0) {
+            if (worldMap[@as(usize, @intFromFloat(self.position.x() + forward.x()))][@as(usize, @intFromFloat(self.position.y()))] == 0) {
                 self.position.data[0] += forward.x();
             }
-            if (worldMap[@floatToInt(usize, self.position.x())][@floatToInt(usize, self.position.y() + forward.y())] == 0) {
+            if (worldMap[@as(usize, @intFromFloat(self.position.x()))][@as(usize, @intFromFloat(self.position.y() + forward.y()))] == 0) {
                 self.position.data[1] += forward.y();
             }
         }
         if (kbd.isDown(.Down)) {
-            if (worldMap[@floatToInt(usize, self.position.x() - forward.x())][@floatToInt(usize, self.position.y())] == 0) {
+            if (worldMap[@as(usize, @intFromFloat(self.position.x() - forward.x()))][@as(usize, @intFromFloat(self.position.y()))] == 0) {
                 self.position.data[0] -= forward.x();
             }
-            if (worldMap[@floatToInt(usize, self.position.x())][@floatToInt(usize, self.position.y() - forward.y())] == 0) {
+            if (worldMap[@as(usize, @intFromFloat(self.position.x()))][@as(usize, @intFromFloat(self.position.y() - forward.y()))] == 0) {
                 self.position.data[1] -= forward.y();
             }
         }
@@ -82,6 +89,16 @@ const Camera = struct {
         }
         if (kbd.isDown(.Right)) {
             self.yaw += std.math.degreesToRadians(f32, rotationDegrees * DELTA_SCALE);
+        }
+
+        if (walking and t % 2 == 0) {
+            if (self.walkUp) {
+                self.pitch += 1;
+                if (self.pitch > 1) self.walkUp = false;
+            } else {
+                self.pitch -= 1;
+                if (self.pitch < -1) self.walkUp = true;
+            }
         }
     }
 
@@ -106,6 +123,9 @@ var state = GameState.MainMenu;
 var camera = Camera{};
 var fps: f32 = 40;
 var hp: u8 = 100; // de 0 à 100
+var score: u32 = 0;
+var highScore: u32 = 0;
+var damageTime: u32 = 0;
 
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
@@ -122,7 +142,7 @@ pub fn loadMapFromFile(comptime file: []const u8) [MAP_WIDTH][MAP_HEIGHT]u8 {
         var y = 0;
         while (split.next()) |line| {
             if (line.len < 2) break;
-            for (line) |char, x| {
+            for (line, 0..) |char, x| {
                 map[x][y] = std.fmt.parseUnsigned(u8, &.{char}, 10) catch unreachable;
             }
             y += 1;
@@ -133,17 +153,17 @@ pub fn loadMapFromFile(comptime file: []const u8) [MAP_WIDTH][MAP_HEIGHT]u8 {
 
 fn fill(filled: *[MAP_WIDTH][MAP_HEIGHT]bool, x: usize, y: usize) void {
     filled[x][y] = true;
-    if (x > 0 and worldMap[x-1][y] == 0 and filled[x-1][y] == false) {
-        fill(filled, x-1, y);
+    if (x > 0 and worldMap[x - 1][y] == 0 and filled[x - 1][y] == false) {
+        fill(filled, x - 1, y);
     }
-    if (x < MAP_WIDTH and worldMap[x+1][y] == 0 and filled[x+1][y] == false) {
-        fill(filled, x+1, y);
+    if (x < MAP_WIDTH and worldMap[x + 1][y] == 0 and filled[x + 1][y] == false) {
+        fill(filled, x + 1, y);
     }
-    if (y > 0 and worldMap[x][y-1] == 0 and filled[x][y-1] == false) {
-        fill(filled, x, y-1);
+    if (y > 0 and worldMap[x][y - 1] == 0 and filled[x][y - 1] == false) {
+        fill(filled, x, y - 1);
     }
-    if (y < MAP_HEIGHT and worldMap[x][y+1] == 0 and filled[x][y+1] == false) {
-        fill(filled, x, y+1);
+    if (y < MAP_HEIGHT and worldMap[x][y + 1] == 0 and filled[x][y + 1] == false) {
+        fill(filled, x, y + 1);
     }
 }
 
@@ -198,6 +218,21 @@ const potentialEnemySpawns = blk: {
     break :blk array;
 };
 
+const Object = struct {
+    texture: u8,
+    x: f32,
+    y: f32,
+    distance: f32 = undefined,
+
+    pub fn sortDsc(_: void, a: Object, b: Object) bool {
+        return a.distance > b.distance;
+    }
+
+    pub fn sortAsc(_: void, a: Object, b: Object) bool {
+        return a.distance < b.distance;
+    }
+};
+
 const Sprite = struct {
     texture: u8,
     x: f32,
@@ -205,6 +240,7 @@ const Sprite = struct {
     distance: f32 = undefined,
     lastSeenPlayerPos: Vec2 = Vec2.new(0, 0),
     shootTimer: u8 = 60,
+    hp: u8 = 100,
 
     pub fn sortDsc(_: void, a: Sprite, b: Sprite) bool {
         return a.distance > b.distance;
@@ -216,43 +252,74 @@ const Sprite = struct {
 
     fn propagate(canSee: *[MAP_WIDTH][MAP_HEIGHT]bool, x: u8, y: u8, right: bool, down: bool) void {
         canSee[x][y] = true;
-        if (!(worldMap[x+1][y] == 0 or !right) or !(worldMap[x-1][y] == 0 or right) or !(worldMap[x][y+1] == 0 or !down) or !(worldMap[x][y-1] == 0 or down)) {
+        if (!(worldMap[x + 1][y] == 0 or !right) or !(worldMap[x - 1][y] == 0 or right) or !(worldMap[x][y + 1] == 0 or !down) or !(worldMap[x][y - 1] == 0 or down)) {
             return;
         }
         if (right) {
-            if (x < MAP_WIDTH and worldMap[x+1][y] == 0 and !canSee[x+1][y]) { // right
-                propagate(canSee, x+1, y, right, down);
+            if (x < MAP_WIDTH and worldMap[x + 1][y] == 0 and !canSee[x + 1][y]) { // right
+                propagate(canSee, x + 1, y, right, down);
             }
         } else {
-            if (x > 0 and worldMap[x-1][y] == 0 and !canSee[x-1][y]) { // left
-                propagate(canSee, x-1, y, right, down);
+            if (x > 0 and worldMap[x - 1][y] == 0 and !canSee[x - 1][y]) { // left
+                propagate(canSee, x - 1, y, right, down);
             }
         }
         if (down) {
-            if (y < MAP_HEIGHT and worldMap[x][y+1] == 0 and !canSee[x][y+1]) { // down
-                propagate(canSee, x, y+1, right, down);
+            if (y < MAP_HEIGHT and worldMap[x][y + 1] == 0 and !canSee[x][y + 1]) { // down
+                propagate(canSee, x, y + 1, right, down);
             }
         } else {
-            if (y > 0 and worldMap[x][y-1] == 0 and !canSee[x][y-1]) { // up
-                propagate(canSee, x, y-1, right, down);
+            if (y > 0 and worldMap[x][y - 1] == 0 and !canSee[x][y - 1]) { // up
+                propagate(canSee, x, y - 1, right, down);
             }
         }
+    }
+
+    pub fn hit(self: *Sprite, damage: u8) void {
+        if (self.hp == 0) return;
+
+        if (self.hp -| damage == 0) {
+            self.shootTimer = 6;
+            self.texture = 7;
+        }
+        self.hp -|= damage;
+    }
+
+    pub fn isDead(self: *const Sprite) bool {
+        return self.hp == 0 and self.texture == 11;
     }
 
     pub fn update(self: *Sprite) void {
         // TODO: regarder en direction de l'ennemi et faire un raycast avec les murs
         // TODO: faire la même chose quand l'ennemi tire
+        if (self.hp == 0) {
+            self.shootTimer -= 1;
+            if (self.shootTimer == 0) {
+                self.shootTimer = 6;
+                self.texture += 1;
+                if (self.texture == 11) {
+                    const object = Object{
+                        .texture = 0,
+                        .x = self.x,
+                        .y = self.y,
+                    };
+                    objects.append(object) catch garbageCollector();
+                    score += 100;
+                }
+            }
+            return;
+        }
 
         var canSee = std.mem.zeroes([MAP_WIDTH][MAP_HEIGHT]bool);
-        const sprX = @floatToInt(u8, self.x);
-        const sprY = @floatToInt(u8, self.y);
+        const sprX = @as(u8, @intFromFloat(self.x));
+        const sprY = @as(u8, @intFromFloat(self.y));
 
         propagate(&canSee, sprX, sprY, false, false);
         propagate(&canSee, sprX, sprY, false, true);
         propagate(&canSee, sprX, sprY, true, false);
         propagate(&canSee, sprX, sprY, true, true);
 
-         // To left
+        // To left
         {
             var x = sprX;
             while (x > 0) : (x -= 1) {
@@ -300,7 +367,7 @@ const Sprite = struct {
             }
         }
 
-        if (canSee[@floatToInt(usize, camera.position.x())][@floatToInt(usize, camera.position.y())]) {
+        if (canSee[@as(usize, @intFromFloat(camera.position.x()))][@as(usize, @intFromFloat(camera.position.y()))]) {
             self.lastSeenPlayerPos = camera.position;
         }
 
@@ -310,10 +377,10 @@ const Sprite = struct {
             const direction = self.lastSeenPlayerPos.sub(Vec2.new(self.x, self.y)).norm().scale(0.05 * DELTA_SCALE);
             if (camera.position.sub(Vec2.new(self.x, self.y)).length() > 3.5) {
                 moved = true;
-                if (worldMap[@floatToInt(usize, self.x + direction.x())][@floatToInt(usize, self.y)] == 0) {
+                if (worldMap[@as(usize, @intFromFloat(self.x + direction.x()))][@as(usize, @intFromFloat(self.y))] == 0) {
                     self.x += direction.x();
                 }
-                if (worldMap[@floatToInt(usize, self.x)][@floatToInt(usize, self.y + direction.y())] == 0) {
+                if (worldMap[@as(usize, @intFromFloat(self.x))][@as(usize, @intFromFloat(self.y + direction.y()))] == 0) {
                     self.y += direction.y();
                 }
             } else {
@@ -325,6 +392,7 @@ const Sprite = struct {
 
                     // TODO: inversement proportionnel à la distance
                     hp -|= 20;
+                    damageTime = 30;
 
                     self.shootTimer = 60; // 1.5 secondes
                 }
@@ -332,7 +400,7 @@ const Sprite = struct {
         }
 
         if (moved) {
-            self.texture = 1 + @intCast(u8, (t / 5) % 4);
+            self.texture = 1 + @as(u8, @intCast((t / 5) % 4));
             self.shootTimer = 40; // 1 seconde
         } else if (prepareShooting) {
             self.texture = 5;
@@ -358,6 +426,8 @@ const WallState = struct {
 
 /// 8 ennemis en même temps maximum
 var sprites = std.BoundedArray(Sprite, 8).init(0) catch unreachable;
+/// Des objects, comme les plantes
+var objects = std.BoundedArray(Object, 64).init(0) catch unreachable;
 var wall_stripes = std.mem.zeroes([eadk.SCENE_WIDTH]WallState);
 
 // TODO: passer en 24x24? ne prend que 3.5KiB pour 3 textures
@@ -381,9 +451,20 @@ const sprite_textures = [_][SPR_TEX_HEIGHT][SPR_TEX_WIDTH]eadk.EadkColor{
     resources.guard_run_4,
     resources.guard_shoot,
     resources.guard_shooting,
+    resources.guard_kill_1,
+    resources.guard_kill_2,
+    resources.guard_kill_3,
+    resources.guard_kill_4,
 };
 
-const player_textures = [_][31][24]eadk.EadkColor {
+const OBJ_TEX_WIDTH = 64;
+const OBJ_TEX_HEIGHT = 64;
+const object_textures = [_][OBJ_TEX_HEIGHT][OBJ_TEX_WIDTH]eadk.EadkColor{
+    resources.guard_corpse,
+    resources.skeleton,
+};
+
+const player_textures = [_][31][24]eadk.EadkColor{
     resources.player_0,
     resources.player_1,
     resources.player_2,
@@ -398,7 +479,7 @@ var pistolFiredTime: u16 = 0;
 
 fn draw() void {
     //@setRuntimeSafety(false);
-    
+
     if (state == .MainMenu) {
         // afficher menu
         eadk.display.fillRectangle(
@@ -443,15 +524,15 @@ fn draw() void {
     var x: u16 = 0;
     while (x < w) : (x += 1) {
         if (!eadk.display.isUpperBuffer) { // calculer une seule fois
-            const cameraX = @intToFloat(f32, 2 * x) / @intToFloat(f32, w) - 1.0;
+            const cameraX = @as(f32, @floatFromInt(2 * x)) / @as(f32, @floatFromInt(w)) - 1.0;
             const rayDirX = dir.x() + planeX * cameraX;
             const rayDirY = dir.y() + planeY * cameraX;
 
-            var mapX = @floatToInt(i16, camera.position.x());
-            var mapY = @floatToInt(i16, camera.position.y());
+            var mapX = @as(i16, @intFromFloat(camera.position.x()));
+            var mapY = @as(i16, @intFromFloat(camera.position.y()));
 
-            const deltaDistX = if (rayDirX == 0) std.math.inf_f32 else @fabs(1.0 / rayDirX);
-            const deltaDistY = if (rayDirY == 0) std.math.inf_f32 else @fabs(1.0 / rayDirY);
+            const deltaDistX = if (rayDirX == 0) std.math.inf(f32) else @fabs(1.0 / rayDirX);
+            const deltaDistY = if (rayDirY == 0) std.math.inf(f32) else @fabs(1.0 / rayDirY);
 
             var sideDistX: f32 = 0;
             var sideDistY: f32 = 0;
@@ -489,7 +570,7 @@ fn draw() void {
                     side = 1;
                 }
 
-                if (mapX >= 0 and mapY >= 0 and mapX < MAP_WIDTH and mapY < MAP_HEIGHT and worldMap[@intCast(u16, mapX)][@intCast(u16, mapY)] > 0) {
+                if (mapX >= 0 and mapY >= 0 and mapX < MAP_WIDTH and mapY < MAP_HEIGHT and worldMap[@as(u16, @intCast(mapX))][@as(u16, @intCast(mapY))] > 0) {
                     hit = true;
                 } else if (mapX >= MAP_WIDTH or mapY >= MAP_HEIGHT) {
                     hit = true;
@@ -502,17 +583,17 @@ fn draw() void {
                 sideDistX - deltaDistX
             else
                 sideDistY - deltaDistY;
-            const lineHeightFloat = @intToFloat(f32, h) / perpWallDist;
-            const lineHeight = @floatToInt(u16, std.math.max(0, std.math.min(h, lineHeightFloat)));
+            const lineHeightFloat = @as(f32, @floatFromInt(h)) / perpWallDist;
+            const lineHeight = @as(u16, @intFromFloat(@max(0, @min(h, lineHeightFloat))));
             zBuffer[x] = perpWallDist;
 
-            const drawStart = std.math.max(0, h / 2 - lineHeight / 2);
-            const drawEnd = std.math.min(
-                lineHeight / 2 + h / 2,
+            const drawStart = @as(u16, @intCast(@max(0, @as(i16, @intCast(h / 2 - lineHeight / 2)) + camera.pitch)));
+            const drawEnd = @min(
+                @as(u16, @intCast(@as(i16, @intCast(lineHeight / 2 + h / 2)) + camera.pitch)),
                 h - 1,
             );
 
-            var textureId = if (mapX >= MAP_WIDTH or mapY >= MAP_HEIGHT or mapX < 0 or mapY < 0) 1 else worldMap[@intCast(u16, mapX)][@intCast(u16, mapY)] -% 1;
+            var textureId = if (mapX >= MAP_WIDTH or mapY >= MAP_HEIGHT or mapX < 0 or mapY < 0) 1 else worldMap[@as(u16, @intCast(mapX))][@as(u16, @intCast(mapY))] -% 1;
             if (textureId == 0xFF) { // it overflowed
                 textureId = 1;
             }
@@ -529,7 +610,7 @@ fn draw() void {
 
             // TODO: changer texPos pour utiliser que des int ? faudrait changer les al gore ithmes
             const step = 1.0 * @as(f32, TEXTURE_HEIGHT) / lineHeightFloat;
-            const texPos = (@intToFloat(f32, @as(isize, drawStart) - h / 2) + lineHeightFloat / 2) * step;
+            const texPos = (@as(f32, @floatFromInt(@as(isize, drawStart) - h / 2 - camera.pitch)) + lineHeightFloat / 2) * step;
             wall_stripes[x] = .{
                 .drawStart = drawStart,
                 .drawEnd = drawEnd,
@@ -546,7 +627,7 @@ fn draw() void {
         var stripe = wall_stripes[x];
         const texture = textures[stripe.textureId];
         var y: u16 = stripe.drawStart;
-        const drawEnd = std.math.min(fbRect.y + fbRect.height, stripe.drawEnd);
+        const drawEnd = @min(fbRect.y + fbRect.height, stripe.drawEnd);
         while (y < drawEnd) : (y += 1) {
             @setRuntimeSafety(false);
             const texY = std.math.lossyCast(usize, stripe.texPos) % TEXTURE_HEIGHT;
@@ -564,7 +645,7 @@ fn draw() void {
     for (sprites.slice()) |*sprite| {
         sprite.distance = (camera.position.x() - sprite.x) * (camera.position.x() - sprite.x) + (camera.position.y() - sprite.y) * (camera.position.y() - sprite.y);
     }
-    std.sort.sort(Sprite, sprites.slice(), {}, Sprite.sortDsc);
+    std.mem.sort(Sprite, sprites.slice(), {}, Sprite.sortDsc);
     for (sprites.constSlice()) |sprite| {
         const spriteX = sprite.x - camera.position.x();
         const spriteY = sprite.y - camera.position.y();
@@ -572,27 +653,68 @@ fn draw() void {
         const invDet = 1.0 / (planeX * dir.y() - dir.x() * planeY);
         const transformX = invDet * (dir.y() * spriteX - dir.x() * spriteY);
         const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
-        var spriteScreenX = std.math.min(@floatToInt(u16, @intToFloat(f32, w) / 2.0 * (1 + transformX / transformY)), 0x7FFF);
-        var spriteHeight = std.math.lossyCast(u16, @fabs(@intToFloat(f32, h) / transformY));
+        var spriteScreenX = std.math.lossyCast(i16, @min(@as(f32, @floatFromInt(w)) / 2.0 * (1 + transformX / transformY), 0x7FFF));
+        var spriteHeight = std.math.lossyCast(u16, @fabs(@as(f32, @floatFromInt(h)) / transformY));
 
-        const drawStartY = h / 2 -| spriteHeight / 2;
-        const drawEndY = std.math.min(h / 2 + spriteHeight / 2, h - 1);
+        const screenY = h / 2;
+        const drawStartY = screenY -| spriteHeight / 2;
+        const drawEndY = @min(screenY + spriteHeight / 2, h - 1);
 
         const spriteWidth = spriteHeight;
-        const drawStartX = spriteScreenX -| spriteWidth / 2;
-        const drawEndX = std.math.min(spriteScreenX + spriteWidth / 2, w - 1);
+        const drawStartX = spriteScreenX -| @as(i16, @intCast(spriteWidth / 2));
+        const drawEndX = std.math.lossyCast(u16, @min(spriteScreenX +| @as(i16, @intCast(spriteWidth / 2)), w - 1));
 
         var stripe = drawStartX;
         while (stripe < drawEndX) : (stripe += 1) {
-            const texX = std.math.lossyCast(u16, 256 * @intToFloat(f32, stripe - drawStartX) * SPR_TEX_WIDTH / @intToFloat(f32, spriteWidth)) / 256;
-            if (transformY > 0 and stripe > 0 and stripe < w and transformY < zBuffer[stripe]) {
+            const texX = std.math.lossyCast(u16, 256 * @as(f32, @floatFromInt(stripe - drawStartX)) * SPR_TEX_WIDTH / @as(f32, @floatFromInt(spriteWidth))) / 256;
+            if (transformY > 0 and stripe > 0 and stripe < w and transformY < zBuffer[@as(u16, @intCast(stripe))]) {
                 var y: u16 = drawStartY;
                 while (y < drawEndY) : (y += 1) {
                     const d = @as(u32, y) * 256 + @as(u32, spriteHeight) * 128 - @as(u32, h) * 128; // ???? https://lodev.org/cgtutor/raycasting3.html
                     const texY = ((d * SPR_TEX_HEIGHT) / spriteHeight) / 256;
                     const color = sprite_textures[sprite.texture][texY][texX];
                     if (color != SPRITE_TRANSPARENT_COLOR) {
-                        eadk.display.setPixel(stripe, y, color);
+                        eadk.display.setPixel(@as(u16, @intCast(stripe)), y, color);
+                    }
+                }
+            }
+        }
+    }
+
+    // Dessiner les objets
+    for (objects.slice()) |*object| {
+        object.distance = (camera.position.x() - object.x) * (camera.position.x() - object.x) + (camera.position.y() - object.y) * (camera.position.y() - object.y);
+    }
+    std.mem.sort(Object, objects.slice(), {}, Object.sortDsc);
+    for (objects.constSlice()) |sprite| {
+        const spriteX = sprite.x - camera.position.x();
+        const spriteY = sprite.y - camera.position.y();
+
+        const invDet = 1.0 / (planeX * dir.y() - dir.x() * planeY);
+        const transformX = invDet * (dir.y() * spriteX - dir.x() * spriteY);
+        const transformY = invDet * (-planeY * spriteX + planeX * spriteY);
+        var spriteScreenX = std.math.lossyCast(i16, @min(@as(f32, @floatFromInt(w)) / 2.0 * (1 + transformX / transformY), 0x7FFF));
+        var spriteHeight = std.math.lossyCast(u16, @fabs(@as(f32, @floatFromInt(h)) / transformY));
+
+        const screenY = h / 2;
+        const drawStartY = screenY -| spriteHeight / 2;
+        const drawEndY = @min(screenY + spriteHeight / 2, h - 1);
+
+        const spriteWidth = spriteHeight;
+        const drawStartX = spriteScreenX -| @as(i16, @intCast(spriteWidth / 2));
+        const drawEndX = std.math.lossyCast(u16, @min(spriteScreenX +| @as(i16, @intCast(spriteWidth / 2)), w - 1));
+
+        var stripe = drawStartX;
+        while (stripe < drawEndX) : (stripe += 1) {
+            const texX = std.math.lossyCast(u16, 256 * @as(f32, @floatFromInt(stripe - drawStartX)) * OBJ_TEX_WIDTH / @as(f32, @floatFromInt(spriteWidth))) / 256;
+            if (transformY > 0 and stripe > 0 and stripe < w and transformY < zBuffer[@as(u16, @intCast(stripe))]) {
+                var y: u16 = drawStartY;
+                while (y < drawEndY) : (y += 1) {
+                    const d = @as(u32, y) * 256 + @as(u32, spriteHeight) * 128 - @as(u32, h) * 128; // ???? https://lodev.org/cgtutor/raycasting3.html
+                    const texY = ((d * OBJ_TEX_HEIGHT) / spriteHeight) / 256;
+                    const color = object_textures[sprite.texture][texY][texX];
+                    if (color != SPRITE_TRANSPARENT_COLOR) {
+                        eadk.display.setPixel(@as(u16, @intCast(stripe)), y, color);
                     }
                 }
             }
@@ -607,23 +729,23 @@ fn draw() void {
         if (isPistolFired) {
             eadk.display.fillTransparentImage(
                 .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (29 * SCALE - 10), .width = 24 * SCALE, .height = 29 * SCALE - 10 },
-                @ptrCast([*]const u16, &resources.pistol_fire),
+                @as([*]const u16, @ptrCast(&resources.pistol_fire)),
                 SCALE,
             );
         } else {
             if (isPistolReloading) {
                 eadk.display.fillTransparentImage(
                     .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (24 * SCALE - 10), .width = 24 * SCALE, .height = 24 * SCALE - 10 },
-                    @ptrCast([*]const u16, &resources.pistol),
+                    @as([*]const u16, @ptrCast(&resources.pistol)),
                     SCALE,
                 );
             } else {
                 eadk.display.fillTransparentImage(
                     .{ .x = eadk.SCENE_WIDTH / 2 - (24 * SCALE / 2), .y = eadk.SCENE_HEIGHT - (24 * SCALE), .width = 24 * SCALE, .height = 24 * SCALE },
-                    @ptrCast([*]const u16, &resources.pistol),
+                    @as([*]const u16, @ptrCast(&resources.pistol)),
                     SCALE,
                 );
-            }       
+            }
         }
 
         // HUD
@@ -635,11 +757,10 @@ fn draw() void {
         }, eadk.rgb(0x404040));
 
         const player_texture = std.math.clamp((100 - hp) / (100 / 8), 0, 7);
-        eadk.display.fillRectangle(
-            .{ .x = eadk.SCREEN_WIDTH / 2 - (32 / 2), .y = eadk.SCREEN_HEIGHT - 32, .width = 32, .height = 32 }, eadk.rgb(0x484848));
+        eadk.display.fillRectangle(.{ .x = eadk.SCREEN_WIDTH / 2 - (32 / 2), .y = eadk.SCREEN_HEIGHT - 32, .width = 32, .height = 32 }, eadk.rgb(0x484848));
         eadk.display.fillTransparentImage(
             .{ .x = eadk.SCREEN_WIDTH / 2 - (24 / 2), .y = eadk.SCREEN_HEIGHT - 31, .width = 24, .height = 31 },
-            @ptrCast([*]const u16, &player_textures[player_texture]),
+            @as([*]const u16, @ptrCast(&player_textures[player_texture])),
             1,
         );
     }
@@ -647,11 +768,41 @@ fn draw() void {
     if (hp == 0) {
         state = .MainMenu;
     }
+
+    if (damageTime > 0) {
+        //eadk.display.fillRectangle(.{
+        //    .x = 0,
+        //    .y = 0,
+        //    .width = eadk.SCENE_WIDTH,
+        //    .height = eadk.SCENE_HEIGHT,
+        //}, eadk.rgb(0xFF0000));
+
+        var pos: usize = 0;
+        const b = eadk.rgb(0xFF0000);
+        const bR = eadk.getRed(b);
+        const bG = eadk.getGreen(b);
+        const bB = eadk.getBlue(b);
+
+        const lt = @as(f32, @floatFromInt(damageTime)) / 30.0;
+        while (pos < eadk.display.FRAMEBUFFER_WIDTH * eadk.display.FRAMEBUFFER_HEIGHT) : (pos += 1) {
+            const a = eadk.display.framebuffer[pos];
+            const aR = eadk.getRed(a);
+            const aG = eadk.getGreen(a);
+            const aB = eadk.getBlue(a);
+
+            eadk.display.framebuffer[pos] = eadk.colorFromComponents(
+                @as(u5, @intFromFloat(@as(f32, @floatFromInt(aR)) * (1 - lt) + @as(f32, @floatFromInt(bR)) * lt)),
+                @as(u6, @intFromFloat(@as(f32, @floatFromInt(aG)) * (1 - lt) + @as(f32, @floatFromInt(bG)) * lt)),
+                @as(u5, @intFromFloat(@as(f32, @floatFromInt(aB)) * (1 - lt) + @as(f32, @floatFromInt(bB)) * lt)),
+            );
+        }
+        damageTime -= 1;
+    }
 }
 
 fn rayAabb(origin: Vec2, direction: Vec2, aabb: [2]Vec2) f32 {
-    var lo = -std.math.inf_f32;
-    var hi =  std.math.inf_f32;
+    var lo = -std.math.inf(f32);
+    var hi = std.math.inf(f32);
 
     comptime var i = 0;
     inline while (i < 2) : (i += 1) {
@@ -663,14 +814,14 @@ fn rayAabb(origin: Vec2, direction: Vec2, aabb: [2]Vec2) f32 {
         }
 
         if (dimHi < lo or dimLo > hi) {
-            return std.math.inf_f32;
+            return std.math.inf(f32);
         }
 
-        lo = std.math.max(lo, dimLo);
-        hi = std.math.min(hi, dimHi);
+        lo = @max(lo, dimLo);
+        hi = @min(hi, dimHi);
     }
 
-    return if (lo > hi) std.math.inf_f32 else lo;
+    return if (lo > hi) std.math.inf(f32) else lo;
 }
 
 fn rayAabbIntersection(origin: Vec2, direction: Vec2, aabb: [2]Vec2) bool {
@@ -684,11 +835,20 @@ fn spawnEnemy(random: std.rand.Random) void {
         if (worldMap[x][y] == 0 and potentialEnemySpawns[x][y]) {
             const sprite = Sprite{
                 .texture = 0,
-                .x = @intToFloat(f32, x) + 0.5,
-                .y = @intToFloat(f32, y) + 0.5,
+                .x = @as(f32, @floatFromInt(x)) + 0.5,
+                .y = @as(f32, @floatFromInt(y)) + 0.5,
             };
             sprites.append(sprite) catch return;
             break;
+        }
+    }
+}
+
+/// Collects garbages (like corpses) from the objects array
+fn garbageCollector() void {
+    for (objects.slice(), 0..) |*object, i| {
+        if (object.texture == 0) { // corpse
+            _ = objects.swapRemove(i);
         }
     }
 }
@@ -702,6 +862,10 @@ fn eadk_main() void {
         const start = eadk.eadk_timing_millis();
 
         const kbd = eadk.keyboard.scan();
+        // HIGH SCORE
+        if (score > highScore) {
+            highScore = score;
+        }
 
         if (state == .Playing) {
             camera.input();
@@ -711,8 +875,11 @@ fn eadk_main() void {
                     spawnEnemy(random);
                 }
             }
-            for (sprites.slice()) |*sprite| {
+            for (sprites.slice(), 0..) |*sprite, i| {
                 sprite.update();
+                if (sprite.isDead()) {
+                    _ = sprites.swapRemove(i);
+                }
             }
 
             // Dessiner le haut
@@ -733,21 +900,14 @@ fn eadk_main() void {
         var buf: [100]u8 = undefined;
         if (state == .Playing) {
             if (hp < 100) {
-                if (t % 40 == 0) hp += 1; // TODO: des potions de soin plutôt?
+                // if (t % 40 == 0) hp += 1; // TODO: des potions de soin plutôt?
             }
 
-            const msg = std.fmt.bufPrintZ(&buf, "{d}fps", .{@floatToInt(u16, fps)}) catch unreachable;
-            eadk.display.drawString(msg, .{ .x = 0, .y = 0 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
+            //const msg = std.fmt.bufPrintZ(&buf, "{d}fps", .{@floatToInt(u16, fps)}) catch unreachable;
+            //eadk.display.drawString(msg, .{ .x = 0, .y = 0 }, false, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
             eadk.display.drawString(
-                std.fmt.bufPrintZ(&buf, "PV: {d}/100", .{hp}) catch unreachable,
-                .{ .x = 0, .y = 12 },
-                false,
-                eadk.rgb(0xFFFFFF),
-                eadk.rgb(0x000000),
-            );
-            eadk.display.drawString(
-                std.fmt.bufPrintZ(&buf, "{d},{d}", .{ @floatToInt(i8, camera.position.x()), @floatToInt(i8, camera.position.y()) }) catch unreachable,
-                .{ .x = 0, .y = 24 },
+                std.fmt.bufPrintZ(&buf, "Score: {d} / {d}", .{ score, score / 800 * 800 + 800 }) catch unreachable,
+                .{ .x = 0, .y = 0 },
                 false,
                 eadk.rgb(0xFFFFFF),
                 eadk.rgb(0x000000),
@@ -755,28 +915,38 @@ fn eadk_main() void {
         }
 
         if (state == .MainMenu) {
-            eadk.display.drawString("Loupstein", .{ .x = 0, .y = 0 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
+            eadk.display.drawString("NazKiller", .{ .x = 0, .y = 0 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x000000));
             eadk.display.drawString("(c) Zen1th", .{ .x = 0, .y = 20 }, false, eadk.rgb(0x888888), eadk.rgb(0x000000));
             eadk.display.drawString("> Press EXE to play", .{ .x = 0, .y = 220 }, true, eadk.rgb(0xFFFFFF), eadk.rgb(0x00000));
+            eadk.display.drawString(
+                std.fmt.bufPrintZ(&buf, "High Score: {}", .{highScore}) catch unreachable,
+                .{ .x = 0, .y = 40 },
+                false,
+                eadk.rgb(0xFFFFFF),
+                eadk.rgb(0x000000),
+            );
 
             if (kbd.isDown(.Exe)) {
                 state = .Playing;
                 t = 0;
                 hp = 100;
+                camera = .{};
+                score = 0;
+                damageTime = 0;
                 sprites.resize(0) catch unreachable;
             }
         } else {
             pistolFiredTime -|= 1;
             if (kbd.isDown(.OK) and pistolFiredTime == 0) {
                 pistolFiredTime = 40; // 1.0 s
-                std.sort.sort(Sprite, sprites.slice(), {}, Sprite.sortAsc);
-                for (sprites.constSlice()) |sprite, i| {
+                std.mem.sort(Sprite, sprites.slice(), {}, Sprite.sortAsc);
+                for (sprites.slice()) |*sprite| {
                     const aabb: [2]Vec2 = .{
                         Vec2.new(sprite.x - 0.5, sprite.y - 0.5),
                         Vec2.new(sprite.x + 0.5, sprite.y + 0.5),
                     };
                     if (rayAabbIntersection(camera.position, camera.getForward(), aabb)) {
-                        _ = sprites.swapRemove(i);
+                        sprite.hit(100);
                         break;
                     }
                 }
@@ -787,9 +957,9 @@ fn eadk_main() void {
         }
 
         const end = eadk.eadk_timing_millis();
-        const frameFps = 1.0 / (@intToFloat(f32, @intCast(u32, end - start)) / 1000);
+        const frameFps = 1.0 / (@as(f32, @floatFromInt(@as(u32, @intCast(end - start)))) / 1000);
         fps = fps * 0.9 + frameFps * 0.1; // faire interpolation linéaire vers la valeur fps
-        if (fps > 40) eadk.display.waitForVblank();
+        if (frameFps > 40) eadk.display.waitForVblank();
     }
 }
 

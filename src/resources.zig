@@ -15,8 +15,15 @@ pub const guard_run_1 = makeImageArray(@embedFile("assets/guard_run_1.bmp"));
 pub const guard_run_2 = makeImageArray(@embedFile("assets/guard_run_2.bmp"));
 pub const guard_run_3 = makeImageArray(@embedFile("assets/guard_run_3.bmp"));
 pub const guard_run_4 = makeImageArray(@embedFile("assets/guard_run_4.bmp"));
+pub const guard_kill_1 = makeImageArray(@embedFile("assets/guard_kill_1.bmp"));
+pub const guard_kill_2 = makeImageArray(@embedFile("assets/guard_kill_2.bmp"));
+pub const guard_kill_3 = makeImageArray(@embedFile("assets/guard_kill_3.bmp"));
+pub const guard_kill_4 = makeImageArray(@embedFile("assets/guard_kill_4.bmp"));
 pub const guard_shoot = makeImageArray(@embedFile("assets/guard_shoot.bmp"));
 pub const guard_shooting = makeImageArray(@embedFile("assets/guard_shooting.bmp"));
+
+pub const skeleton = makeImageArray(@embedFile("assets/skeleton.bmp"));
+pub const guard_corpse = makeImageArray(@embedFile("assets/guard_corpse.bmp"));
 
 pub const player_0 = makeImageArray(@embedFile("assets/player_0.bmp"));
 pub const player_1 = makeImageArray(@embedFile("assets/player_1.bmp"));
